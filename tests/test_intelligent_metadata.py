@@ -20,7 +20,7 @@ class TestIntelligentMeta(unittest.TestCase):
         meta = SUT.IntelligentMeta('2012-01-01-foo.md', {})
         date = meta['date']
         self.assertIsInstance(date, datetime.date)
-        self.assertEqual('2012-01-01 00:00:00', str(date))
+        self.assertEqual(datetime.date(2012, 1, 1), date.date())
 
     def test_today_if_no_date(self):
         meta = SUT.IntelligentMeta('foo.md', {})
@@ -38,4 +38,4 @@ class TestIntelligentMeta(unittest.TestCase):
     def test_previous_date(self):
         meta = SUT.IntelligentMeta('2012-01-01-foo.md',
                                    {'date': '2013-05-05'})
-        self.assertEqual('2013-05-05 00:00:00', str(meta['date']))
+        self.assertEqual(datetime.date(2013, 5, 5), meta['date'].date())
