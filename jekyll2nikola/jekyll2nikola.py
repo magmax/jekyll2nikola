@@ -107,14 +107,14 @@ class JekyllPost(object):
     @property
     def metadata(self):
         docs = yaml.load_all(self._content)
-        metadata = docs.next()
+        metadata = next(docs)
         filename = os.path.basename(self._path)
         return IntelligentMeta(filename, metadata)
 
     @property
     def document(self):
-        foo = yaml.compose_all(self._content)
-        composer = foo.next()
+        composer_iter = yaml.compose_all(self._content)
+        composer = next(composer_iter)
         last_line = composer.end_mark.line + 1
         return '\n'.join(self._content.splitlines()[last_line:])
 
