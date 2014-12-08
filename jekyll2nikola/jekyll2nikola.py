@@ -7,17 +7,17 @@ import argparse
 import logging
 import csv
 import datetime
-import dateutil.parser
+from dateutil import parser as dateparser
 
 
 logger = logging.getLogger(__name__)
 
 
-class JekyllImportError(Exception):
+class Jekyll2NikolaError(Exception):
     pass
 
 
-class UnsupportedFileType(JekyllImportError):
+class UnsupportedFileType(Jekyll2NikolaError):
     def __init__(self, ext, *args, **kwargs):
         super(UnsupportedFileType, self).__init__(self)
         self._ext = ext
@@ -26,14 +26,90 @@ class UnsupportedFileType(JekyllImportError):
         return 'Unsupported file type "%s"' % self._ext
 
 
-class JekyllReader(object):
-    def __init__(self, content):
+class UnsupportedMetadataType(Jekyll2NikolaError):
+    def __init__(self, metadata, *args, **kwargs):
+        super(UnsupportedMetadataType, self).__init__(self)
+        self._metadata = metadata
+
+    def __str__(self):
+        return 'Unsupported metadata type "%s"' % type(self._metadata)
+
+
+class IntelligentMeta(object):
+    def __init__(self, filename, metadata):
+        if isinstance(metadata, list):
+            self._meta = {}
+            for item in metadata:
+                key = item.keys()[0]
+                value = item[key]
+                self._meta[key] = value
+        elif isinstance(metadata, dict):
+            self._meta = metadata
+        else:
+            raise UnsupportedMetadataType(metadata)
+
+        self._filename = filename
+
+    @property
+    def keys(self):
+        return self._meta.keys()
+
+    def __getitem__(self, key):
+        if key in self._meta and key is not 'date':
+            return self._meta[key]
+
+        method = self._EXTRACTORS.get(key)
+        if method:
+            return method(self)
+
+    def _extract_title(self):
+        regex = (
+            r'(?:\d+-\d+-\d+-)'
+            r'(?P<name>.+?)'
+            r'(?:\.\w+)?$'
+        )
+        m = re.match(regex, self._filename)
+        if m is None:
+            return None
+        name = m.group('name')
+        return name
+
+    def _extract_slug(self):
+        title = self['title']
+        return re.sub(r'\W', '_', title)
+
+    def _extract_date(self):
+        raw_date = self._meta.get('date')
+        if isinstance(raw_date, datetime.date):
+            return raw_date
+        if isinstance(raw_date, str):
+            return dateparser.parse(raw_date)
+
+        # date not in metadata or unreadable. Trying from filename.
+        raw_date = re.findall(r'\d+\-\d+\-\d+', self._filename)
+        if raw_date:
+            return dateparser.parse(raw_date[0])
+        logger.warning('Unknown date "%s". Using today.', raw_date)
+        return datetime.date.today()
+
+    _EXTRACTORS = {
+        'title': _extract_title,
+        'slug': _extract_slug,
+        'date': _extract_date,
+    }
+
+
+class JekyllPost(object):
+    def __init__(self, path, content):
         self._content = content
+        self._path = path
 
     @property
     def metadata(self):
         docs = yaml.load_all(self._content)
-        return docs.next()
+        metadata = docs.next()
+        filename = os.path.basename(self._path)
+        return IntelligentMeta(filename, metadata)
 
     @property
     def document(self):
@@ -55,21 +131,21 @@ class JekyllReader(object):
         return document[document.find('\n', end.end()) + 1:] if end else ''
 
     def _find_teaser_end(self, document):
-        return re.search('<!--\s*more\s*-->|..\s+more', document)
+        return re.search(r'<!--\s*more\s*-->|..\s+more', document)
 
 
 class JekyllFilter(object):
     REGEX_CODE = (
-        '\{%\s*highlight\s*(?P<lang>\w+)?'
-        '(?P<props>\s*(?:linenos|linenos=\w+|hl_lines|hl_lines=\S+))*\s*%\}'
-        '(?P<code>.*?)'
-        '\{%\s*endhighlight\s*%\}'
+        r'\{%\s*highlight\s*(?P<lang>\w+)?'
+        r'(?P<props>\s*(?:linenos|linenos=\w+|hl_lines|hl_lines=\S+))*\s*%\}'
+        r'(?P<code>.*?)'
+        r'\{%\s*endhighlight\s*%\}'
     )
     REGEX_LINK = (
-        '{%' '\s*'
-        'post_url' '\s*'
-        '(?P<url>.*?)' '\s*'
-        '%}'
+        r'{%' r'\s*'
+        r'post_url' r'\s*'
+        r'(?P<url>.*?)' r'\s*'
+        r'%}'
     )
 
     def __init__(self, content, link_map=None):
@@ -87,11 +163,7 @@ class JekyllFilter(object):
         def code_repl(matchobj):
             lang = matchobj.group('lang')
             code = matchobj.group('code')
-            return '.. code::%s\n%s' % (
-                ' %s' % lang if lang else '',
-                '\n'.join(('    ' + s if s.strip() else '')
-                          for s in code.splitlines())
-            )
+            return self._code_surround(lang, code)
         self.content = re.sub(self.REGEX_CODE, code_repl, self.content,
                               flags=re.MULTILINE | re.DOTALL)
 
@@ -103,57 +175,17 @@ class JekyllFilter(object):
             return 'link://slug/%s' % self._link_map.get(url, url)
         self.content = re.sub(self.REGEX_LINK, link_repl, self.content)
 
-
-class IntelligentMeta(object):
-    def __init__(self, filename, metadata):
-        self._meta = metadata
-        self._filename = filename
-
-    @property
-    def keys(self):
-        return self._meta.keys()
-
-    def __getitem__(self, key):
-        if key in self._meta and key is not 'date':
-            return self._meta[key]
-
-        method = self._EXTRACTORS.get(key)
-        if method:
-            return method(self)
-
-    def _extract_title(self):
-        regex = (
-            '(?:\d+-\d+-\d+-)'
-            '(?P<name>.+?)'
-            '(?:\.\w+)?$'
+    def _code_surround(self, lang, code):
+        return '.. code::%s\n%s' % (
+            ' %s' % lang if lang else '',
+            '\n'.join(('    ' + s if s.strip() else '')
+                      for s in code.splitlines())
         )
-        m = re.match(regex, self._filename)
-        name = m.group('name')
-        return name
 
-    def _extract_slug(self):
-        title = self['title']
-        return re.sub('\W', '_', title)
 
-    def _extract_date(self):
-        raw_date = self._meta.get('date')
-        if isinstance(raw_date, datetime.date):
-            return raw_date
-        if isinstance(raw_date, str):
-            return dateutil.parser.parse(raw_date)
-
-        # date not in metadata or unreadable. Trying from filename.
-        raw_date = re.findall('\d+\-\d+\-\d+', self._filename)
-        if raw_date:
-            return dateutil.parser.parse(raw_date[0])
-        logger.warning('Unknown date "%s". Using today.', raw_date)
-        return datetime.date.today()
-
-    _EXTRACTORS = {
-        'title': _extract_title,
-        'slug': _extract_slug,
-        'date': _extract_date,
-    }
+class MarkdownJekyllFilter(JekyllFilter):
+    def _code_surround(self, lang, code):
+        return '```%s%s```' % (lang.strip() if lang else '', code)
 
 
 class NikolaWriter(object):
@@ -176,8 +208,7 @@ class NikolaWriter(object):
 
     def write_metadata(self):
         """Overrideable."""
-        meta = IntelligentMeta(os.path.basename(self.filename),
-                               self.reader.metadata)
+        meta = self.reader.metadata
         mandatory = ('title', 'slug', 'date')
         for key in mandatory:
             self.write_metadata_line(key, meta[key])
@@ -244,7 +275,6 @@ class FileWalker(object):
                 path = os.path.join(self._root, filename)
                 if os.path.isfile(path):
                     yield path
-                    #yield os.path.join(path, filename)
                 else:
                     logging.debug('Ignoring directory "%s"', path)
 
@@ -275,19 +305,30 @@ def load_link_map(filename):
 
 def get_links(filename, links):
     logger.debug('Getting links for file %s', filename)
+    if filename.endswith(('.md', '.markdown')):
+        FilterClass = MarkdownJekyllFilter
+    else:
+        FilterClass = JekyllFilter
 
     with open(filename) as fd:
         content = fd.read()
-    jekyll_filter = JekyllFilter(content)
+    jekyll_filter = FilterClass(content)
     links.extend(jekyll_filter.get_internal_refs())
 
 
 def import_file(path, output, link_map):
     logger.debug('Importing file %s', path)
+    if path.endswith(('.md', '.markdown')):
+        WriterClass = MarkdownNikolaWriter
+        FilterClass = MarkdownJekyllFilter
+    else:
+        WriterClass = NikolaWriter
+        FilterClass = JekyllFilter
+
     with open(path) as fd:
         content = fd.read()
-    jekyll_reader = JekyllReader(content)
-    jekyll_filter = JekyllFilter(content, link_map)
+    jekyll_reader = JekyllPost(path, content)
+    jekyll_filter = FilterClass(content, link_map)
     jekyll_filter.replace()
 
     filename = os.path.basename(path)
@@ -295,10 +336,7 @@ def import_file(path, output, link_map):
     date = metadata['date']
     output_file = os.path.join(output, str(date.year), str(date.month),
                                filename)
-    if filename.endswith(('.md', '.markdown')):
-        writer = MarkdownNikolaWriter(output_file, jekyll_reader)
-    else:
-        writer = NikolaWriter(output_file, jekyll_reader)
+    writer = WriterClass(output_file, jekyll_reader)
     writer.write()
     logger.info('File %s imported!', path)
 
@@ -312,7 +350,8 @@ def main():
                         help='Path to take files from')
     parser.add_argument('-t', '--to', dest='sink', default='output',
                         help='Path to take files from')
-    parser.add_argument('-r', '--recursive', action="store_true", default=False,
+    parser.add_argument('-r', '--recursive', action="store_true",
+                        default=False,
                         help='Recursive for directories')
     parser.add_argument('-l', '--link-file', dest='linkfile', default='links',
                         help='File with mappings links=slug')

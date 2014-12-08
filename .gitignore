@@ -2,3 +2,9 @@
 \#*
 \.\#*
 *.pyc
+*egg-info/
+runtests.py
+dist/
+build/
+.coverage
+venv/

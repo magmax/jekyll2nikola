@@ -9,7 +9,7 @@ TODO:
 -----
 
 * **DONE:** Import ReStructured Text
-* Import MarkDown
+* **DONE:**: Import MarkDown
 * **DONE:** Fix links directives
 * **DONE:** Fix code directives
 * Addapt tags:
