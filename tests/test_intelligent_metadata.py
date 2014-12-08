@@ -14,7 +14,7 @@ class TestIntelligentMeta(unittest.TestCase):
     def test_no_previous_data_tricky(self):
         meta = SUT.IntelligentMeta('2012-01-01-this is España.md', {})
         self.assertEqual('this is España', meta['title'])
-        self.assertEqual('this_is_Espa__a', meta['slug'])
+        assert (meta['slug'] in ('this_is_Espa__a', 'this_is_España'))
 
     def test_date(self):
         meta = SUT.IntelligentMeta('2012-01-01-foo.md', {})
