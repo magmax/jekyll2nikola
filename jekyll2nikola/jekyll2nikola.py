@@ -366,7 +366,7 @@ def main():
     walker = FileWalker(args.source, args.recursive)
     if args.operation == 'get_links':
         walker.process(get_links, links)
-        print '\n'.join(sorted(set(links)))
+        print('\n'.join(sorted(set(links))))
     elif args.operation == 'import':
         link_map = load_link_map(args.linkfile)
         walker.process(import_file, args.sink, link_map)
