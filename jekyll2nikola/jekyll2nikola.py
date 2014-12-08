@@ -40,7 +40,7 @@ class IntelligentMeta(object):
         if isinstance(metadata, list):
             self._meta = {}
             for item in metadata:
-                key = item.keys()[0]
+                key = next(item.keys())
                 value = item[key]
                 self._meta[key] = value
         elif isinstance(metadata, dict):
